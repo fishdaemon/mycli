@@ -1,0 +1,4 @@
+mycli
+=====
+
+mysql cli helpers
