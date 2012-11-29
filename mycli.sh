@@ -19,6 +19,17 @@ function cmd_backup()
 	
 
 }
+function cmd_query()
+{
+	local _db=${1-$mysql_default_db}
+	if [[ -z "$_db" ]]
+	then
+		echo "no db selected" 1>&2
+		return 1
+	fi
+	local view=${3-'E'}
+	mysql -u$mysql_user -p$mysql_passwd -h$mysql_host $_db -$view -e "$2"
+}
 function cmd_config()
 {
 	
@@ -188,7 +199,7 @@ function cmd_setup()
 }
 function command_not_found_handle()
 {
-	echo "usage: $0 setup | backup [db_name] |restore [db_name] [n] | save [db_name|list|s3] [filename (empty for stdout) ]| import dbname [file|folder|s3]"
+	echo "usage: $0 setup | backup [db_name] |restore [db_name] [n] | save [db_name|list|s3] [filename (empty for stdout) ]| import dbname [file|folder|s3] | query 'sql' [t|E]"
 }
 [[ -f $HOME/.mycli ]] || cmd_setup 
 . $HOME/.mycli
