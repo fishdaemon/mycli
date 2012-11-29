@@ -8,11 +8,13 @@ function cmd_backup()
 	if [[ -z "$_db" ]]
 	then
 		echo "no db selected" 1>&2
+		return 1
 	fi
 	local _date=$(date -u --rfc-3339=ns | cut -f1 -d' ')
 	local _time=$(date -u --rfc-3339=ns | cut -f2 -d' ')
 	local _dir="$PWD/$_db/$_date"
 	mkdir -p "$_dir"
+	echo "backing up"
 	mysqldump -u$mysql_user -p$mysql_passwd -h$mysql_host $(__ignore_table $_db) $_db > "$_dir/$_time.sql" && s3cmd put "$_dir/$_time.sql" s3://$s3_bucket/$s3_prefix/$_db/$_date/$_time.sql && rm -r "$_db"
 	
 
@@ -60,8 +62,7 @@ function cmd_restore()
 	echo "Downloading ${sel#*s3://}"
 	local tmp=$(mktemp $PWD/dump.XXXXX)
 	s3cmd --force get "s3://${sel#*s3://}" "$tmp"
-
-	mysql -u$mysql_user -p$mysql_passwd -h$mysql_host $_db < "$tmp"
+	mysql -u$mysql_user -p$mysql_passwd -h$mysql_host $_db < "$tmp"	
 	rm "$tmp"
 
 
@@ -74,6 +75,88 @@ function __ignore_table()
 		ret+="--ignore-table=$1.$t "
 	done
 	echo "$ret"
+}
+function cmd_import()
+{
+	local _db="${1-$mysql_default_db}"
+	if [[ -z "$_db" ]]
+	then
+		echo "No db selected" 1>&2
+		return 1
+	fi
+	[[ -f "$2" ]] && local file="$2" || [[ -d "$2" ]] && local dir="$2" || [[ "$2" =~ ^s3://.*$ ]] && local s3="$2"
+	if [[ ! -z "$dir" ]]
+	then
+		echo "Creating backup"
+		cmd_backup "$_db" || return 1
+		for file in $(ls "$dir"/*.sql)
+		do
+			echo "Importing $file"
+			mysql -u$mysql_user -p$mysql_passwd -h$mysql_host $_db < "$file"
+		done
+	elif [[ ! -z "$file" ]]
+	then
+		echo "Creating backup"
+		cmd_backup "$_db" || return 1
+		echo "Importing $file"
+		mysql -u$mysql_user -p$mysql_passwd -h$mysql_host $_db < "$file"
+	elif [[ ! -z "$s3" ]]
+	then 
+		local tmp="$PWD/$(mktemp XXXX)"
+		echo "Downloading ${sel#*s3://}"			
+		s3cmd --force get "$s3" "$tmp" || return 1
+
+		cmd_backup "$_db" || return 1
+		echo "Importing $s3"
+		mysql -u$mysql_user -p$mysql_passwd -h$mysql_host $_db < "$tmp" || return 1
+		rm "$tmp"
+	else
+		echo "No files selects" 1>&2
+		return 1
+	fi
+
+}
+function cmd_save()
+{
+	local choice="${1-$mysql_default_db}"
+	local out="$2"
+	local d
+	local -a _dumps
+	local _date=$(date -u --rfc-3339=ns | cut -f1 -d' ')
+	local -i i len c
+	c=1
+	local tmp="$PWD/$(mktemp XXXX)"
+	if [[ $choice =~ ^s3://.*$ ]]
+	then
+		echo "Downloading $choice"
+		s3cmd --force get "$choice" "$tmp" || return 1
+	elif [[ $choice == "list"  ]]
+	then 
+		while read d
+		do
+			_dumps=("$d" "${_dumps[@]}")
+		done <<<"$(s3cmd -H ls s3://$s3_bucket/$s3_prefix/$mysql_default_db/$_date/*)"
+		len=${#_dumps[@]}
+		for (( i=0; i<$len; i++ ))
+		do
+			echo "$c : ${_dumps[$i]}"
+			(( c++ ))
+			[[ $c == 50 ]] && break
+		done
+		while [[ ! $choice =~ [1-9][0-9]* ]]
+		do
+			read -e -p"Pick a number to restore from: " choice
+			local sel="${_dumps[(($choice -1))]}" 
+			echo "Downloading ${sel#*s3://}"			
+			s3cmd --force get "s3://${sel#*s3://}" "$tmp" || return 1
+		done
+	else 
+		echo "dumping local db $choice"
+		mysqldump -u$mysql_user -p$mysql_passwd -h$mysql_host $(__ignore_table $choice) $choice > "$tmp" || return 1
+	fi
+	[[ -z "$out" ]] && cat "$tmp" || cp "$tmp" "$out"
+	rm "$tmp"
+
 }
 function cmd_setup()
 {
@@ -105,7 +188,7 @@ function cmd_setup()
 }
 function command_not_found_handle()
 {
-	echo "usage: $0 setup | backup [db_name] |restore [db_name] [n]"
+	echo "usage: $0 setup | backup [db_name] |restore [db_name] [n] | save [db_name|list|s3] [filename (empty for stdout) ]| import dbname [file|folder|s3]"
 }
 [[ -f $HOME/.mycli ]] || cmd_setup 
 . $HOME/.mycli
