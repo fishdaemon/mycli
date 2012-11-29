@@ -87,6 +87,48 @@ function __ignore_table()
 	done
 	echo "$ret"
 }
+function cmd_tail()
+{
+	local db="${1-$mysql_default_db}"
+	local table="${2-log}"
+	local threshold="${3-4}"
+	local -i last=$(cmd_query "$db" "select * from ${table} order by id DESC limit 1" | grep id: |tr -d ' ' | cut -f2 -d':')
+	local row key value printit 
+
+	while true
+	do
+		sleep 1
+		while read row
+		do
+			local -A out
+			row="${row// /}"
+			key="${row%:*}"
+			value="${row#*:}"
+			case "$key" in
+				id )
+					last=$value
+					;;
+				priority )
+					[[  $value > $threshold ]] && printit=true || printit=false
+					;;
+				priority_name )
+					out[prio]="$value"
+					;;				
+				message )
+					out[message]="$value"
+					;;
+				created_date )
+					out[utcts]=$(date --utc -d'2012-11-29 04:42:00' +%s)
+					;;
+				method )
+					out[method]="${value//\/home\/millionmind\/vhosts\/}"
+					;;
+			esac	
+			[[ $printit ]] && echo "${out[utcts]} ${out[prio]} : ${out[message]} (${out[method]})"
+			
+		done <<<$(cmd_query "$db" "select * from ${table} where id > $last order by id ASC")
+	done
+}
 function cmd_import()
 {
 	local _db="${1-$mysql_default_db}"
