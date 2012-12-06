@@ -15,7 +15,7 @@ function cmd_backup()
 	local _dir="$PWD/$_db/$_date"
 	mkdir -p "$_dir"
 	echo "backing up"
-	mysqldump -u$mysql_user -p$mysql_passwd -h$mysql_host $(__ignore_table $_db) $_db > "$_dir/$_time.sql" && s3cmd put "$_dir/$_time.sql" s3://$s3_bucket/$s3_prefix/$_db/$_date/$_time.sql && rm -r "$_db"
+	mysqldump -u$mysql_user -p$mysql_passwd -h$mysql_host $(__ignore_table $_db) $_db > "$_dir/$_time.sql" && s3cmd put "$_dir/$_time.sql" s3://$s3_bucket/$s3_prefix/$_db/$_date/$(hostname)-$_time.sql && rm -r "$_db"
 	
 
 }
